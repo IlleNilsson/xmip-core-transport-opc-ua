@@ -45,6 +45,7 @@ pub use client::Client;
 pub use node::NodeId;
 pub use session::{Event, Session};
 use transport::error::{Result, protocol_error};
+use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
 use transport::{Arrived, Directions, Transport};
@@ -177,20 +178,9 @@ impl OpcUaTransport {
     }
 }
 
-/// A bound listener waiting for the one client that writes one value.
-struct Listening {
-    transport: OpcUaTransport,
-    listener: TcpListener,
-    address: String,
-}
-
-impl FarEnd for Listening {
-    fn address(&self) -> &str {
-        &self.address
-    }
-
-    fn take_one(self: Box<Self>) -> Result<Arrived> {
-        let mut session = self.transport.accept_one(&self.listener)?;
+impl Accepting for OpcUaTransport {
+    fn take_one(&self, listener: &TcpListener) -> Result<Arrived> {
+        let mut session = self.accept_one(listener)?;
         let arrived = session
             .next_write()?
             .ok_or_else(|| protocol_error("the client closed without writing"))?;
@@ -204,11 +194,7 @@ impl FarEnd for Listening {
 impl Loopback for OpcUaTransport {
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
         let (listener, address) = self.bind()?;
-        Ok(Box::new(Listening {
-            transport: self.clone(),
-            listener,
-            address,
-        }))
+        Ok(Box::new(Listening::new(self.clone(), listener, address)))
     }
 
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
@@ -225,6 +211,7 @@ impl Loopback for OpcUaTransport {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    use transport::payload::edge_payloads;
 
     fn secs(n: u64) -> Duration {
         Duration::from_secs(n)
@@ -232,19 +219,6 @@ mod tests {
 
     fn node() -> NodeId {
         NodeId::string(2, "Orders")
-    }
-
-    /// The Playground's edge payloads, written here so the crate does not
-    /// depend on it.
-    fn edge_payloads() -> Vec<(&'static str, Vec<u8>)> {
-        vec![
-            ("empty", Vec::new()),
-            ("one byte", vec![0x2a]),
-            ("every byte", (0..=255).collect()),
-            ("nul run", vec![0; 512]),
-            ("high bytes", vec![0xff; 512]),
-            ("crlf storm", b"\r\n".repeat(400)),
-        ]
     }
 
     #[test]
