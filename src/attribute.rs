@@ -2,11 +2,13 @@
 //! Read of one node's value attribute, with its source timestamp asked
 //! for, and a Write of one, each answered with its one result.
 
+use codec::cursor::Cursor;
+use codec::writer::ByteWriter;
 use transport::error::{Result, protocol_error};
 
 use crate::node::NodeId;
 use crate::service::{RequestHeader, ResponseHeader, body};
-use crate::wire::{self, DataValue, Reader};
+use crate::wire::{DataValue, UaBinary, UaBinaryWrite};
 
 /// `ReadRequest_Encoding_DefaultBinary`.
 pub const READ_REQUEST: u32 = 631;
@@ -32,29 +34,29 @@ impl Read {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = body(READ_REQUEST);
         self.header.put(&mut out);
-        wire::put_f64(&mut out, 0.0);
-        wire::put_u32(&mut out, 0);
-        wire::put_i32(&mut out, 1);
+        out.f64_le(0.0);
+        out.u32_le(0);
+        out.i32_le(1);
         self.node.put(&mut out);
-        wire::put_u32(&mut out, VALUE_ATTRIBUTE);
-        wire::put_string(&mut out, None);
-        wire::put_u16(&mut out, 0);
-        wire::put_string(&mut out, None);
+        out.u32_le(VALUE_ATTRIBUTE);
+        out.string(None);
+        out.u16_le(0);
+        out.string(None);
         out
     }
 
     /// # Errors
     /// Where the request is cut short, reads more than one node, or an
     /// attribute other than the value.
-    pub fn take(reader: &mut Reader<'_>) -> Result<Self> {
+    pub fn take(reader: &mut Cursor<'_>) -> Result<Self> {
         let header = RequestHeader::take(reader)?;
-        reader.f64()?;
-        reader.u32()?;
+        reader.f64_le()?;
+        reader.u32_le()?;
         if reader.count()? != 1 {
             return Err(protocol_error("a read of other than one node"));
         }
         let node = reader.node_id()?;
-        if reader.u32()? != VALUE_ATTRIBUTE {
+        if reader.u32_le()? != VALUE_ATTRIBUTE {
             return Err(protocol_error(
                 "a read of an attribute other than the value",
             ));
@@ -75,15 +77,15 @@ impl ReadResult {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = body(READ_RESPONSE);
         self.header.put(&mut out);
-        wire::put_i32(&mut out, 1);
+        out.i32_le(1);
         self.value.put(&mut out);
-        wire::put_i32(&mut out, 0);
+        out.i32_le(0);
         out
     }
 
     /// # Errors
     /// Where the response is cut short or carries other than one result.
-    pub fn take(reader: &mut Reader<'_>) -> Result<Self> {
+    pub fn take(reader: &mut Cursor<'_>) -> Result<Self> {
         let header = ResponseHeader::take(reader)?;
         if reader.count()? != 1 {
             return Err(protocol_error("a read answered with other than one result"));
@@ -106,10 +108,10 @@ impl Write {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = body(WRITE_REQUEST);
         self.header.put(&mut out);
-        wire::put_i32(&mut out, 1);
+        out.i32_le(1);
         self.node.put(&mut out);
-        wire::put_u32(&mut out, VALUE_ATTRIBUTE);
-        wire::put_string(&mut out, None);
+        out.u32_le(VALUE_ATTRIBUTE);
+        out.string(None);
         self.value.put(&mut out);
         out
     }
@@ -117,13 +119,13 @@ impl Write {
     /// # Errors
     /// Where the request is cut short, writes more than one node, an
     /// attribute other than the value, or a value that is not bytes.
-    pub fn take(reader: &mut Reader<'_>) -> Result<Self> {
+    pub fn take(reader: &mut Cursor<'_>) -> Result<Self> {
         let header = RequestHeader::take(reader)?;
         if reader.count()? != 1 {
             return Err(protocol_error("a write of other than one node"));
         }
         let node = reader.node_id()?;
-        if reader.u32()? != VALUE_ATTRIBUTE {
+        if reader.u32_le()? != VALUE_ATTRIBUTE {
             return Err(protocol_error(
                 "a write of an attribute other than the value",
             ));
@@ -150,22 +152,22 @@ impl WriteResult {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = body(WRITE_RESPONSE);
         self.header.put(&mut out);
-        wire::put_i32(&mut out, 1);
-        wire::put_u32(&mut out, self.status);
-        wire::put_i32(&mut out, 0);
+        out.i32_le(1);
+        out.u32_le(self.status);
+        out.i32_le(0);
         out
     }
 
     /// # Errors
     /// Where the response is cut short or carries other than one result.
-    pub fn take(reader: &mut Reader<'_>) -> Result<Self> {
+    pub fn take(reader: &mut Cursor<'_>) -> Result<Self> {
         let header = ResponseHeader::take(reader)?;
         if reader.count()? != 1 {
             return Err(protocol_error(
                 "a write answered with other than one result",
             ));
         }
-        let status = reader.u32()?;
+        let status = reader.u32_le()?;
         Ok(Self { header, status })
     }
 }
@@ -220,9 +222,9 @@ mod tests {
         assert_eq!(WriteResult::take(&mut reader).expect("result"), result);
         let mut two = body(READ_REQUEST);
         request().put(&mut two);
-        wire::put_f64(&mut two, 0.0);
-        wire::put_u32(&mut two, 0);
-        wire::put_i32(&mut two, 2);
+        two.f64_le(0.0);
+        two.u32_le(0);
+        two.i32_le(2);
         let bytes = two;
         let (_, mut reader) = type_of(&bytes).expect("type");
         assert!(Read::take(&mut reader).is_err());

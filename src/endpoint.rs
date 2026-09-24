@@ -5,12 +5,14 @@
 //! takes; `ActivateSession` presents an identity — anonymous here, by the
 //! policy id the endpoint listed — and `CloseSession` ends it.
 
+use codec::cursor::Cursor;
+use codec::writer::ByteWriter;
 use transport::error::{Result, protocol_error};
 
 use crate::channel::NONE_POLICY;
 use crate::node::NodeId;
 use crate::service::{RequestHeader, ResponseHeader, body};
-use crate::wire::{self, Reader};
+use crate::wire::{UaBinary, UaBinaryWrite};
 
 /// `CreateSessionRequest_Encoding_DefaultBinary`.
 pub const CREATE_SESSION_REQUEST: u32 = 461;
@@ -35,20 +37,20 @@ pub const BINARY_PROFILE: &str =
 
 /// The application description, a client's or a server's.
 fn put_application(out: &mut Vec<u8>, kind: u32) {
-    wire::put_string(out, Some(APPLICATION_URI));
-    wire::put_string(out, Some(APPLICATION_URI));
-    wire::put_localized_text(out, "Xmip");
-    wire::put_u32(out, kind);
-    wire::put_string(out, None);
-    wire::put_string(out, None);
-    wire::put_i32(out, 0);
+    out.string(Some(APPLICATION_URI));
+    out.string(Some(APPLICATION_URI));
+    out.localized_text("Xmip");
+    out.u32_le(kind);
+    out.string(None);
+    out.string(None);
+    out.i32_le(0);
 }
 
-fn skip_application(reader: &mut Reader<'_>) -> Result<()> {
+fn skip_application(reader: &mut Cursor<'_>) -> Result<()> {
     reader.string()?;
     reader.string()?;
     reader.skip_localized_text()?;
-    reader.u32()?;
+    reader.u32_le()?;
     reader.string()?;
     reader.string()?;
     for _ in 0..reader.count()? {
@@ -71,19 +73,19 @@ impl CreateSession {
         let mut out = body(CREATE_SESSION_REQUEST);
         self.header.put(&mut out);
         put_application(&mut out, 1);
-        wire::put_string(&mut out, None);
-        wire::put_string(&mut out, Some(&self.endpoint_url));
-        wire::put_string(&mut out, Some(&self.session_name));
-        wire::put_byte_string(&mut out, None);
-        wire::put_byte_string(&mut out, None);
-        wire::put_f64(&mut out, 60_000.0);
-        wire::put_u32(&mut out, 0);
+        out.string(None);
+        out.string(Some(&self.endpoint_url));
+        out.string(Some(&self.session_name));
+        out.byte_string(None);
+        out.byte_string(None);
+        out.f64_le(60_000.0);
+        out.u32_le(0);
         out
     }
 
     /// # Errors
     /// Where the request is cut short.
-    pub fn take(reader: &mut Reader<'_>) -> Result<Self> {
+    pub fn take(reader: &mut Cursor<'_>) -> Result<Self> {
         let header = RequestHeader::take(reader)?;
         skip_application(reader)?;
         reader.string()?;
@@ -108,33 +110,33 @@ pub struct Endpoint {
 
 impl Endpoint {
     fn put(&self, out: &mut Vec<u8>) {
-        wire::put_string(out, Some(&self.url));
+        out.string(Some(&self.url));
         put_application(out, 0);
-        wire::put_byte_string(out, None);
-        wire::put_u32(out, 1);
-        wire::put_string(out, Some(&self.security_policy));
-        wire::put_i32(out, i32::from(self.anonymous_policy.is_some()));
+        out.byte_string(None);
+        out.u32_le(1);
+        out.string(Some(&self.security_policy));
+        out.i32_le(i32::from(self.anonymous_policy.is_some()));
         if let Some(policy) = &self.anonymous_policy {
-            wire::put_string(out, Some(policy));
-            wire::put_u32(out, 0);
-            wire::put_string(out, None);
-            wire::put_string(out, None);
-            wire::put_string(out, None);
+            out.string(Some(policy));
+            out.u32_le(0);
+            out.string(None);
+            out.string(None);
+            out.string(None);
         }
-        wire::put_string(out, Some(BINARY_PROFILE));
-        wire::put_u8(out, 0);
+        out.string(Some(BINARY_PROFILE));
+        out.byte(0);
     }
 
-    fn take(reader: &mut Reader<'_>) -> Result<Self> {
+    fn take(reader: &mut Cursor<'_>) -> Result<Self> {
         let url = reader.string()?.unwrap_or_default();
         skip_application(reader)?;
         reader.byte_string()?;
-        reader.u32()?;
+        reader.u32_le()?;
         let security_policy = reader.string()?.unwrap_or_default();
         let mut anonymous_policy = None;
         for _ in 0..reader.count()? {
             let policy_id = reader.string()?;
-            let token_type = reader.u32()?;
+            let token_type = reader.u32_le()?;
             reader.string()?;
             reader.string()?;
             reader.string()?;
@@ -143,7 +145,7 @@ impl Endpoint {
             }
         }
         reader.string()?;
-        reader.u8()?;
+        reader.byte()?;
         Ok(Self {
             url,
             security_policy,
@@ -168,27 +170,27 @@ impl SessionCreated {
         self.header.put(&mut out);
         self.session_id.put(&mut out);
         self.token.put(&mut out);
-        wire::put_f64(&mut out, 60_000.0);
-        wire::put_byte_string(&mut out, None);
-        wire::put_byte_string(&mut out, None);
-        wire::put_i32(&mut out, i32::try_from(self.endpoints.len()).unwrap_or(0));
+        out.f64_le(60_000.0);
+        out.byte_string(None);
+        out.byte_string(None);
+        out.i32_le(i32::try_from(self.endpoints.len()).unwrap_or(0));
         for endpoint in &self.endpoints {
             endpoint.put(&mut out);
         }
-        wire::put_i32(&mut out, 0);
-        wire::put_string(&mut out, None);
-        wire::put_byte_string(&mut out, None);
-        wire::put_u32(&mut out, 0);
+        out.i32_le(0);
+        out.string(None);
+        out.byte_string(None);
+        out.u32_le(0);
         out
     }
 
     /// # Errors
     /// Where the response is cut short.
-    pub fn take(reader: &mut Reader<'_>) -> Result<Self> {
+    pub fn take(reader: &mut Cursor<'_>) -> Result<Self> {
         let header = ResponseHeader::take(reader)?;
         let session_id = reader.node_id()?;
         let token = reader.node_id()?;
-        reader.f64()?;
+        reader.f64_le()?;
         reader.byte_string()?;
         reader.byte_string()?;
         let mut endpoints = Vec::new();
@@ -231,24 +233,24 @@ impl ActivateSession {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = body(ACTIVATE_SESSION_REQUEST);
         self.header.put(&mut out);
-        wire::put_string(&mut out, None);
-        wire::put_byte_string(&mut out, None);
-        wire::put_i32(&mut out, 0);
-        wire::put_i32(&mut out, 0);
+        out.string(None);
+        out.byte_string(None);
+        out.i32_le(0);
+        out.i32_le(0);
         NodeId::numeric(0, ANONYMOUS_IDENTITY_TOKEN).put(&mut out);
-        wire::put_u8(&mut out, 1);
+        out.byte(1);
         let mut token = Vec::new();
-        wire::put_string(&mut token, Some(&self.policy_id));
-        wire::put_byte_string(&mut out, Some(&token));
-        wire::put_string(&mut out, None);
-        wire::put_byte_string(&mut out, None);
+        token.string(Some(&self.policy_id));
+        out.byte_string(Some(&token));
+        out.string(None);
+        out.byte_string(None);
         out
     }
 
     /// # Errors
     /// Where the request is cut short or presents an identity other than
     /// anonymous.
-    pub fn take(reader: &mut Reader<'_>) -> Result<Self> {
+    pub fn take(reader: &mut Cursor<'_>) -> Result<Self> {
         let header = RequestHeader::take(reader)?;
         reader.string()?;
         reader.byte_string()?;
@@ -260,13 +262,13 @@ impl ActivateSession {
             reader.string()?;
         }
         let identity = reader.node_id()?;
-        if identity != NodeId::numeric(0, ANONYMOUS_IDENTITY_TOKEN) || reader.u8()? != 1 {
+        if identity != NodeId::numeric(0, ANONYMOUS_IDENTITY_TOKEN) || reader.byte()? != 1 {
             return Err(protocol_error(format!(
                 "an identity token of type {identity}, and this side takes anonymous"
             )));
         }
         let token = reader.byte_string()?.unwrap_or_default();
-        let policy_id = Reader::new(token).string()?.unwrap_or_default();
+        let policy_id = Cursor::new(token).string()?.unwrap_or_default();
         Ok(Self { header, policy_id })
     }
 }
@@ -276,9 +278,9 @@ impl ActivateSession {
 pub fn session_activated(header: &ResponseHeader) -> Vec<u8> {
     let mut out = body(ACTIVATE_SESSION_RESPONSE);
     header.put(&mut out);
-    wire::put_byte_string(&mut out, None);
-    wire::put_i32(&mut out, 0);
-    wire::put_i32(&mut out, 0);
+    out.byte_string(None);
+    out.i32_le(0);
+    out.i32_le(0);
     out
 }
 
@@ -287,7 +289,7 @@ pub fn session_activated(header: &ResponseHeader) -> Vec<u8> {
 pub fn close_session(header: &RequestHeader) -> Vec<u8> {
     let mut out = body(CLOSE_SESSION_REQUEST);
     header.put(&mut out);
-    wire::put_bool(&mut out, true);
+    out.bool(true);
     out
 }
 
@@ -390,12 +392,12 @@ mod tests {
         assert_eq!(id, CLOSE_SESSION_RESPONSE);
         let mut user = body(ACTIVATE_SESSION_REQUEST);
         request().put(&mut user);
-        wire::put_string(&mut user, None);
-        wire::put_byte_string(&mut user, None);
-        wire::put_i32(&mut user, 0);
-        wire::put_i32(&mut user, 0);
+        user.string(None);
+        user.byte_string(None);
+        user.i32_le(0);
+        user.i32_le(0);
         NodeId::numeric(0, 324).put(&mut user);
-        wire::put_u8(&mut user, 1);
+        user.byte(1);
         let bytes = user;
         let (_, mut reader) = type_of(&bytes).expect("type");
         let error = ActivateSession::take(&mut reader).expect_err("a user name token");

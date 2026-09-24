@@ -9,9 +9,11 @@
 
 use std::io::{Read, Write};
 
+use codec::cursor::Cursor;
+use codec::writer::ByteWriter;
 use transport::error::{Result, TransportError, classify, protocol_error};
 
-use crate::wire::{self, Reader};
+use crate::wire::{UaBinary, UaBinaryWrite};
 
 /// The one security policy this crate speaks.
 pub const NONE_POLICY: &str = "http://opcfoundation.org/UA/SecurityPolicy#None";
@@ -57,20 +59,20 @@ impl Limits {
     };
 
     fn put(&self, out: &mut Vec<u8>) {
-        wire::put_u32(out, PROTOCOL_VERSION);
-        wire::put_u32(out, self.receive_buffer);
-        wire::put_u32(out, self.send_buffer);
-        wire::put_u32(out, self.max_message);
-        wire::put_u32(out, self.max_chunks);
+        out.u32_le(PROTOCOL_VERSION);
+        out.u32_le(self.receive_buffer);
+        out.u32_le(self.send_buffer);
+        out.u32_le(self.max_message);
+        out.u32_le(self.max_chunks);
     }
 
-    fn take(reader: &mut Reader<'_>) -> Result<Self> {
-        reader.u32()?;
+    fn take(reader: &mut Cursor<'_>) -> Result<Self> {
+        reader.u32_le()?;
         let limits = Self {
-            receive_buffer: reader.u32()?,
-            send_buffer: reader.u32()?,
-            max_message: reader.u32()?,
-            max_chunks: reader.u32()?,
+            receive_buffer: reader.u32_le()?,
+            send_buffer: reader.u32_le()?,
+            max_message: reader.u32_le()?,
+            max_chunks: reader.u32_le()?,
         };
         if limits.receive_buffer < MIN_BUFFER || limits.send_buffer < MIN_BUFFER {
             return Err(protocol_error(
@@ -99,14 +101,14 @@ impl Hello {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::new();
         self.limits.put(&mut out);
-        wire::put_string(&mut out, Some(&self.endpoint_url));
+        out.string(Some(&self.endpoint_url));
         out
     }
 
     /// # Errors
     /// Where the body is cut short or the limits are under the minimum.
     pub fn from_bytes(body: &[u8]) -> Result<Self> {
-        let mut reader = Reader::new(body);
+        let mut reader = Cursor::new(body);
         Ok(Self {
             limits: Limits::take(&mut reader)?,
             endpoint_url: reader.string()?.unwrap_or_default(),
@@ -132,7 +134,7 @@ impl Acknowledge {
     /// Where the body is cut short or the limits are under the minimum.
     pub fn from_bytes(body: &[u8]) -> Result<Self> {
         Ok(Self {
-            limits: Limits::take(&mut Reader::new(body))?,
+            limits: Limits::take(&mut Cursor::new(body))?,
         })
     }
 }
@@ -148,17 +150,17 @@ impl Fault {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        wire::put_u32(&mut out, self.code);
-        wire::put_string(&mut out, Some(&self.reason));
+        out.u32_le(self.code);
+        out.string(Some(&self.reason));
         out
     }
 
     /// # Errors
     /// Where the body is cut short.
     pub fn from_bytes(body: &[u8]) -> Result<Self> {
-        let mut reader = Reader::new(body);
+        let mut reader = Cursor::new(body);
         Ok(Self {
-            code: reader.u32()?,
+            code: reader.u32_le()?,
             reason: reader.string()?.unwrap_or_default(),
         })
     }
@@ -175,7 +177,7 @@ pub fn write_raw(writer: &mut impl Write, kind: [u8; 3], is_final: u8, body: &[u
     let mut message = Vec::with_capacity(body.len() + 8);
     message.extend_from_slice(&kind);
     message.push(is_final);
-    wire::put_u32(&mut message, size);
+    message.u32_le(size);
     message.extend_from_slice(body);
     writer
         .write_all(&message)
@@ -245,16 +247,16 @@ pub fn write_secure(writer: &mut impl Write, message: &Secure, chunk: usize) -> 
         .enumerate()
     {
         let mut out = Vec::with_capacity(body.len() + 64);
-        wire::put_u32(&mut out, message.channel_id);
+        out.u32_le(message.channel_id);
         if message.kind == OPEN {
-            wire::put_string(&mut out, Some(NONE_POLICY));
-            wire::put_byte_string(&mut out, None);
-            wire::put_byte_string(&mut out, None);
+            out.string(Some(NONE_POLICY));
+            out.byte_string(None);
+            out.byte_string(None);
         } else {
-            wire::put_u32(&mut out, message.token_id);
+            out.u32_le(message.token_id);
         }
-        wire::put_u32(&mut out, sequence);
-        wire::put_u32(&mut out, message.request_id);
+        out.u32_le(sequence);
+        out.u32_le(message.request_id);
         out.extend_from_slice(body);
         let is_final = if index + 1 == count { b'F' } else { b'C' };
         write_raw(writer, message.kind, is_final, &out)?;
@@ -295,8 +297,8 @@ pub fn read_secure(reader: &mut impl Read, max: usize) -> Result<Option<Secure>>
         if is_final == b'A' {
             return Err(protocol_error("the other side aborted the message"));
         }
-        let mut chunk = Reader::new(&raw);
-        let channel_id = chunk.u32()?;
+        let mut chunk = Cursor::new(&raw);
+        let channel_id = chunk.u32_le()?;
         let token_id = if kind == OPEN {
             let policy = chunk.string()?.unwrap_or_default();
             if policy != NONE_POLICY {
@@ -308,10 +310,10 @@ pub fn read_secure(reader: &mut impl Read, max: usize) -> Result<Option<Secure>>
             chunk.byte_string()?;
             0
         } else {
-            chunk.u32()?
+            chunk.u32_le()?
         };
-        let sequence = chunk.u32()?;
-        let request_id = chunk.u32()?;
+        let sequence = chunk.u32_le()?;
+        let request_id = chunk.u32_le()?;
         let so_far = message.get_or_insert_with(|| Secure {
             kind,
             channel_id,
@@ -325,12 +327,12 @@ pub fn read_secure(reader: &mut impl Read, max: usize) -> Result<Option<Secure>>
                 "a chunk of another message in the middle of this one",
             ));
         }
-        if so_far.body.len() + chunk.rest().len() > max {
+        if so_far.body.len() + chunk.remaining().len() > max {
             return Err(protocol_error(format!(
                 "a message over the {max} bytes read here"
             )));
         }
-        so_far.body.extend_from_slice(chunk.rest());
+        so_far.body.extend_from_slice(chunk.remaining());
         if is_final == b'F' {
             return Ok(message);
         }

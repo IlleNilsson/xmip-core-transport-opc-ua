@@ -7,6 +7,7 @@ use std::io::BufReader;
 use std::net::TcpStream;
 use std::time::Duration;
 
+use codec::cursor::Cursor;
 use transport::error::{Result, protocol_error};
 use transport::socket;
 use transport::wire::MAX_BODY;
@@ -17,7 +18,7 @@ use crate::channel::{self, Acknowledge, Hello, Limits, Secure};
 use crate::endpoint::{self, ActivateSession, CreateSession, SessionCreated};
 use crate::node::NodeId;
 use crate::service::{self, ChannelOpened, GOOD, OpenChannel, RequestHeader, ResponseHeader};
-use crate::wire::{DataValue, Reader};
+use crate::wire::DataValue;
 
 /// How long a channel token and a session are asked for, in milliseconds.
 const LIFETIME: u32 = 3_600_000;
@@ -215,7 +216,7 @@ impl Client {
 
     /// A reader over the answer past its type, which must be `expected`;
     /// a service fault is the error it carries.
-    fn expect(body: &[u8], expected: u32) -> Result<Reader<'_>> {
+    fn expect(body: &[u8], expected: u32) -> Result<Cursor<'_>> {
         let (id, mut reader) = service::type_of(body)?;
         if id == service::SERVICE_FAULT {
             let header = ResponseHeader::take(&mut reader)?;

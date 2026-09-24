@@ -5,9 +5,10 @@
 
 use std::fmt;
 
+use codec::writer::ByteWriter;
 use transport::error::{Result, protocol_error};
 
-use crate::wire::{put_string, put_u8, put_u16, put_u32};
+use crate::wire::UaBinaryWrite;
 
 /// The identifier of one node in one namespace.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -55,23 +56,23 @@ impl NodeId {
     pub fn put(&self, out: &mut Vec<u8>) {
         match self {
             Self::Numeric { namespace: 0, id } if *id < 256 => {
-                put_u8(out, 0x00);
-                put_u8(out, u8::try_from(*id).unwrap_or(u8::MAX));
+                out.byte(0x00);
+                out.byte(u8::try_from(*id).unwrap_or(u8::MAX));
             }
             Self::Numeric { namespace, id } if *namespace < 256 && *id < 65_536 => {
-                put_u8(out, 0x01);
-                put_u8(out, u8::try_from(*namespace).unwrap_or(u8::MAX));
-                put_u16(out, u16::try_from(*id).unwrap_or(u16::MAX));
+                out.byte(0x01);
+                out.byte(u8::try_from(*namespace).unwrap_or(u8::MAX));
+                out.u16_le(u16::try_from(*id).unwrap_or(u16::MAX));
             }
             Self::Numeric { namespace, id } => {
-                put_u8(out, 0x02);
-                put_u16(out, *namespace);
-                put_u32(out, *id);
+                out.byte(0x02);
+                out.u16_le(*namespace);
+                out.u32_le(*id);
             }
             Self::String { namespace, id } => {
-                put_u8(out, 0x03);
-                put_u16(out, *namespace);
-                put_string(out, Some(id));
+                out.byte(0x03);
+                out.u16_le(*namespace);
+                out.string(Some(id));
             }
         }
     }
@@ -90,7 +91,8 @@ impl fmt::Display for NodeId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wire::Reader;
+    use crate::wire::UaBinary;
+    use codec::cursor::Cursor;
 
     #[test]
     fn a_node_id_takes_its_shortest_form_and_reads_back() {
@@ -104,7 +106,7 @@ mod tests {
             let mut out = Vec::new();
             node.put(&mut out);
             assert_eq!(out[0], first_byte, "{text}");
-            assert_eq!(Reader::new(&out).node_id().expect("read"), node);
+            assert_eq!(Cursor::new(&out).node_id().expect("read"), node);
             assert_eq!(node.to_string(), text);
         }
         assert!(NodeId::parse("ns=x;i=1").is_err());
@@ -113,9 +115,9 @@ mod tests {
         let mut guid = vec![0x04, 0, 0];
         guid.extend_from_slice(&[9; 16]);
         assert_eq!(
-            Reader::new(&guid).node_id().expect("guid"),
+            Cursor::new(&guid).node_id().expect("guid"),
             NodeId::numeric(0, 0)
         );
-        assert!(Reader::new(&[0x09]).node_id().is_err());
+        assert!(Cursor::new(&[0x09]).node_id().is_err());
     }
 }
