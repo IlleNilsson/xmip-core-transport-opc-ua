@@ -14,6 +14,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use codec::cursor::Cursor;
 use transport::Arrived;
 use transport::error::{Result, protocol_error};
 use transport::socket;
@@ -25,7 +26,7 @@ use crate::endpoint::{self, ActivateSession, CreateSession, Endpoint, SessionCre
 use crate::node::NodeId;
 use crate::service::{self, ChannelOpened, OpenChannel};
 use crate::service::{RequestHeader, ResponseHeader};
-use crate::wire::{DataValue, Reader};
+use crate::wire::DataValue;
 
 /// The one user token policy this session offers.
 pub const ANONYMOUS_POLICY: &str = "anonymous";
@@ -223,7 +224,7 @@ impl Session {
         }
     }
 
-    fn create_session(&mut self, reader: &mut Reader<'_>) -> Served {
+    fn create_session(&mut self, reader: &mut Cursor<'_>) -> Served {
         let create = CreateSession::take(reader)?;
         let token = NodeId::string(0, format!("xmip-session-{}", self.channel_id));
         self.token = Some(token.clone());
@@ -244,7 +245,7 @@ impl Session {
         )))
     }
 
-    fn activate_session(&mut self, reader: &mut Reader<'_>) -> Served {
+    fn activate_session(&mut self, reader: &mut Cursor<'_>) -> Served {
         let activate = ActivateSession::take(reader)?;
         if self.token.as_ref() != Some(&activate.header.token) {
             return Ok(Err(service::BAD_SESSION_ID_INVALID));
@@ -260,7 +261,7 @@ impl Session {
         )))
     }
 
-    fn read(&mut self, reader: &mut Reader<'_>) -> Served {
+    fn read(&mut self, reader: &mut Cursor<'_>) -> Served {
         let read = Read::take(reader)?;
         if let Err(code) = self.check(&read.header) {
             return Ok(Err(code));
@@ -277,7 +278,7 @@ impl Session {
         Ok(Ok((result.to_bytes(), Event::Read(read.node))))
     }
 
-    fn write(&mut self, reader: &mut Reader<'_>) -> Served {
+    fn write(&mut self, reader: &mut Cursor<'_>) -> Served {
         let write = Write::take(reader)?;
         if let Err(code) = self.check(&write.header) {
             return Ok(Err(code));
@@ -312,7 +313,7 @@ impl Session {
         )))
     }
 
-    fn close_session(&mut self, reader: &mut Reader<'_>) -> Served {
+    fn close_session(&mut self, reader: &mut Cursor<'_>) -> Served {
         let header = RequestHeader::take(reader)?;
         if self.token.as_ref() != Some(&header.token) {
             return Ok(Err(service::BAD_SESSION_ID_INVALID));

@@ -19,6 +19,8 @@ path = "src/lib.rs"
 # little-endian integers, counted strings and a node id, and with security
 # policy None there is nothing to sign.
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+# The estate's encoding primitives: the byte cursor and writer the binary encoding is read and written over.
+codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
 
 [dev-dependencies]
 # The loopback payloads the tests drive, from the capability's test

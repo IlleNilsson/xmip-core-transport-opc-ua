@@ -5,10 +5,12 @@
 //! body opens with the node id of what it is; the ids are the numeric
 //! ones of the default binary encoding.
 
+use codec::cursor::Cursor;
+use codec::writer::ByteWriter;
 use transport::error::{Result, TransportError, protocol_error};
 
 use crate::node::NodeId;
-use crate::wire::{self, Reader};
+use crate::wire::{self, UaBinary, UaBinaryWrite};
 
 /// `OpenSecureChannelRequest_Encoding_DefaultBinary`.
 pub const OPEN_CHANNEL_REQUEST: u32 = 446;
@@ -93,26 +95,26 @@ impl RequestHeader {
 
     pub fn put(&self, out: &mut Vec<u8>) {
         self.token.put(out);
-        wire::put_i64(out, self.timestamp);
-        wire::put_u32(out, self.handle);
-        wire::put_u32(out, 0);
-        wire::put_string(out, None);
-        wire::put_u32(out, self.timeout_hint);
+        out.i64_le(self.timestamp);
+        out.u32_le(self.handle);
+        out.u32_le(0);
+        out.string(None);
+        out.u32_le(self.timeout_hint);
         NodeId::numeric(0, 0).put(out);
-        wire::put_u8(out, 0);
+        out.byte(0);
     }
 
     /// # Errors
     /// Where the header is cut short.
-    pub fn take(reader: &mut Reader<'_>) -> Result<Self> {
+    pub fn take(reader: &mut Cursor<'_>) -> Result<Self> {
         let token = reader.node_id()?;
-        let timestamp = reader.i64()?;
-        let handle = reader.u32()?;
-        reader.u32()?;
+        let timestamp = reader.i64_le()?;
+        let handle = reader.u32_le()?;
+        reader.u32_le()?;
         reader.string()?;
-        let timeout_hint = reader.u32()?;
+        let timeout_hint = reader.u32_le()?;
         reader.node_id()?;
-        if reader.u8()? != 0 {
+        if reader.byte()? != 0 {
             return Err(protocol_error("a request with an additional header"));
         }
         Ok(Self {
@@ -144,27 +146,27 @@ impl ResponseHeader {
     }
 
     pub fn put(&self, out: &mut Vec<u8>) {
-        wire::put_i64(out, self.timestamp);
-        wire::put_u32(out, self.handle);
-        wire::put_u32(out, self.result);
-        wire::put_no_diagnostic_info(out);
-        wire::put_i32(out, 0);
+        out.i64_le(self.timestamp);
+        out.u32_le(self.handle);
+        out.u32_le(self.result);
+        out.no_diagnostic_info();
+        out.i32_le(0);
         NodeId::numeric(0, 0).put(out);
-        wire::put_u8(out, 0);
+        out.byte(0);
     }
 
     /// # Errors
     /// Where the header is cut short.
-    pub fn take(reader: &mut Reader<'_>) -> Result<Self> {
-        let timestamp = reader.i64()?;
-        let handle = reader.u32()?;
-        let result = reader.u32()?;
+    pub fn take(reader: &mut Cursor<'_>) -> Result<Self> {
+        let timestamp = reader.i64_le()?;
+        let handle = reader.u32_le()?;
+        let result = reader.u32_le()?;
         reader.skip_diagnostic_info()?;
         for _ in 0..reader.count()? {
             reader.string()?;
         }
         reader.node_id()?;
-        if reader.u8()? != 0 {
+        if reader.byte()? != 0 {
             return Err(protocol_error("a response with an additional header"));
         }
         Ok(Self {
@@ -187,8 +189,8 @@ pub fn body(type_id: u32) -> Vec<u8> {
 ///
 /// # Errors
 /// Where the body does not open with a numeric node id of namespace 0.
-pub fn type_of(bytes: &[u8]) -> Result<(u32, Reader<'_>)> {
-    let mut reader = Reader::new(bytes);
+pub fn type_of(bytes: &[u8]) -> Result<(u32, Cursor<'_>)> {
+    let mut reader = Cursor::new(bytes);
     match reader.node_id()? {
         NodeId::Numeric { namespace: 0, id } => Ok((id, reader)),
         other => Err(protocol_error(format!("a body of type {other}"))),
@@ -208,30 +210,30 @@ impl OpenChannel {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = body(OPEN_CHANNEL_REQUEST);
         self.header.put(&mut out);
-        wire::put_u32(&mut out, crate::channel::PROTOCOL_VERSION);
-        wire::put_u32(&mut out, 0);
-        wire::put_u32(&mut out, 1);
-        wire::put_byte_string(&mut out, None);
-        wire::put_u32(&mut out, self.requested_lifetime);
+        out.u32_le(crate::channel::PROTOCOL_VERSION);
+        out.u32_le(0);
+        out.u32_le(1);
+        out.byte_string(None);
+        out.u32_le(self.requested_lifetime);
         out
     }
 
     /// # Errors
     /// Where the request is cut short, renews rather than issues, or asks
     /// for a security mode other than None.
-    pub fn take(reader: &mut Reader<'_>) -> Result<Self> {
+    pub fn take(reader: &mut Cursor<'_>) -> Result<Self> {
         let header = RequestHeader::take(reader)?;
-        reader.u32()?;
-        if reader.u32()? != 0 {
+        reader.u32_le()?;
+        if reader.u32_le()? != 0 {
             return Err(protocol_error("a token renewal, and this side issues only"));
         }
-        if reader.u32()? != 1 {
+        if reader.u32_le()? != 1 {
             return Err(protocol_error("a security mode other than None"));
         }
         reader.byte_string()?;
         Ok(Self {
             header,
-            requested_lifetime: reader.u32()?,
+            requested_lifetime: reader.u32_le()?,
         })
     }
 }
@@ -250,24 +252,24 @@ impl ChannelOpened {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = body(OPEN_CHANNEL_RESPONSE);
         self.header.put(&mut out);
-        wire::put_u32(&mut out, crate::channel::PROTOCOL_VERSION);
-        wire::put_u32(&mut out, self.channel_id);
-        wire::put_u32(&mut out, self.token_id);
-        wire::put_i64(&mut out, self.header.timestamp);
-        wire::put_u32(&mut out, self.lifetime);
-        wire::put_byte_string(&mut out, None);
+        out.u32_le(crate::channel::PROTOCOL_VERSION);
+        out.u32_le(self.channel_id);
+        out.u32_le(self.token_id);
+        out.i64_le(self.header.timestamp);
+        out.u32_le(self.lifetime);
+        out.byte_string(None);
         out
     }
 
     /// # Errors
     /// Where the response is cut short.
-    pub fn take(reader: &mut Reader<'_>) -> Result<Self> {
+    pub fn take(reader: &mut Cursor<'_>) -> Result<Self> {
         let header = ResponseHeader::take(reader)?;
-        reader.u32()?;
-        let channel_id = reader.u32()?;
-        let token_id = reader.u32()?;
-        reader.i64()?;
-        let lifetime = reader.u32()?;
+        reader.u32_le()?;
+        let channel_id = reader.u32_le()?;
+        let token_id = reader.u32_le()?;
+        reader.i64_le()?;
+        let lifetime = reader.u32_le()?;
         reader.byte_string()?;
         Ok(Self {
             header,
