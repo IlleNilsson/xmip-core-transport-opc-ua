@@ -48,8 +48,9 @@ use transport::error::{Result, protocol_error};
 use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
-use transport::{Arrived, Directions, Transport};
+use transport::{Arrived, Configured, Directions, Transport};
 pub use wire::DataValue;
+use xcore::settings::{Applies, Kind, Presence, Read, Setting, Settings};
 
 /// The endpoint path and node the loopback pair agrees on.
 const LOOPBACK_PATH: &str = "/xmip";
@@ -167,6 +168,45 @@ impl Transport for OpcUaTransport {
     }
 }
 
+impl Configured for OpcUaTransport {
+    /// The address is the endpoint, `opc.tcp://host:4840/path`: where a
+    /// Location opens its channel and session.
+    const SETTINGS: &'static Settings = &Settings {
+        technology: env!("CARGO_PKG_NAME"),
+        settings: &[
+            Setting {
+                name: "node",
+                kind: Kind::Text,
+                presence: Presence::Required,
+                meaning: "The node whose value a Receive Location reads, as `ns=2;s=Orders` \
+                          or `i=2253`.",
+                applies: Applies::Receive,
+            },
+            Setting {
+                name: "timeout",
+                kind: Kind::Duration,
+                presence: Presence::Optional,
+                meaning: "How long a server that stops mid-answer is waited on; unbounded \
+                          when left out.",
+                applies: Applies::Both,
+            },
+        ],
+    };
+
+    /// A Send Location's target names the node it writes, so it reads none.
+    fn configured(address: &str, settings: &Read) -> Result<Self> {
+        let node = match settings.optional_text("node") {
+            Some(node) => NodeId::parse(node)?,
+            None => NodeId::numeric(0, 0),
+        };
+        let transport = Self::new(address, node);
+        Ok(match settings.optional_duration("timeout") {
+            Some(timeout) => transport.timing_out_after(timeout),
+            None => transport,
+        })
+    }
+}
+
 impl OpcUaTransport {
     /// Both ends on this machine: an ephemeral local port, one node, the
     /// loopback timeout on every read.
@@ -211,6 +251,24 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use transport::payload::edge_payloads;
+
+    #[test]
+    fn opc_ua_declares_its_settings_and_reads_through_them() {
+        use xcore::settings::Given;
+        assert_eq!(OpcUaTransport::SETTINGS.problems(), Vec::<String>::new());
+        let endpoint = "opc.tcp://plant:4840/line";
+        let text = |name: &str, value: &str| (name.to_string(), Given::Text(value.to_string()));
+        let given = [text("node", "ns=2;s=Orders"), text("timeout", "2s")];
+        let built = OpcUaTransport::open(endpoint, Applies::Receive, &given).expect("built");
+        assert_eq!(built.endpoint, endpoint);
+        assert_eq!(built.node.to_string(), "ns=2;s=Orders");
+        assert_eq!(built.timeout, Some(secs(2)));
+        assert!(OpcUaTransport::open(endpoint, Applies::Send, &given[1..]).is_ok());
+        let Err(refused) = OpcUaTransport::open(endpoint, Applies::Receive, &given[1..]) else {
+            panic!("node is required");
+        };
+        assert!(refused.message.contains("\"node\""), "{}", refused.message);
+    }
 
     fn secs(n: u64) -> Duration {
         Duration::from_secs(n)
