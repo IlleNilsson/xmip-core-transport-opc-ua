@@ -8,9 +8,9 @@ use std::net::TcpStream;
 use std::time::Duration;
 
 use codec::cursor::Cursor;
+use net::MAX_BODY;
 use transport::error::{Result, protocol_error};
 use transport::socket;
-use transport::wire::MAX_BODY;
 
 use crate::attribute;
 use crate::attribute::{Read, ReadResult, Write, WriteResult};

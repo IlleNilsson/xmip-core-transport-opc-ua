@@ -15,10 +15,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use codec::cursor::Cursor;
+use net::MAX_BODY;
 use transport::Arrived;
 use transport::error::{Result, protocol_error};
 use transport::socket;
-use transport::wire::MAX_BODY;
 
 use crate::attribute::{self, Read, ReadResult, Write, WriteResult};
 use crate::channel::{self, Acknowledge, Fault, Hello, Limits, NONE_POLICY, Secure};
@@ -226,7 +226,9 @@ impl Session {
 
     fn create_session(&mut self, reader: &mut Cursor<'_>) -> Served {
         let create = CreateSession::take(reader)?;
-        let token = NodeId::string(0, format!("xmip-session-{}", self.channel_id));
+        // Part 4 section 5.6.2: the authentication token is the session's
+        // secret, so it is random, never the channel's number.
+        let token = NodeId::string(0, codec::hex::encode(&codec::random::array::<32>()));
         self.token = Some(token.clone());
         self.activated = false;
         let created = SessionCreated {
