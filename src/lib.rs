@@ -48,7 +48,7 @@ use transport::error::{Result, protocol_error};
 use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
-use transport::{Arrived, Configured, Directions, Transport};
+use transport::{Arrived, Configured, Directions, Pool, Transport};
 pub use wire::DataValue;
 use xcore::settings::{Applies, Kind, Presence, Read, Setting, Settings};
 
@@ -62,6 +62,8 @@ pub struct OpcUaTransport {
     endpoint: String,
     node: NodeId,
     timeout: Option<Duration>,
+    /// The sessions a send writes on, activated once per endpoint and kept.
+    sessions: Pool<Client>,
 }
 
 impl OpcUaTransport {
@@ -73,6 +75,7 @@ impl OpcUaTransport {
             endpoint: endpoint.into(),
             node,
             timeout: None,
+            sessions: Pool::new(),
         }
     }
 
@@ -159,12 +162,16 @@ impl Transport for OpcUaTransport {
         Ok(vec![Arrived::new(origin, bytes)])
     }
 
+    /// Write the node's value on the session kept for the endpoint,
+    /// activated on the first send to it.
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
         let (endpoint, node) = self.resolve(target)?;
         let (authority, _) = split(&endpoint)?;
-        let mut client = Client::connect(authority, &endpoint, self.timeout)?;
-        client.write(&node, bytes)?;
-        client.close()
+        self.sessions.exchange(
+            &endpoint,
+            || Client::connect(authority, &endpoint, self.timeout),
+            |client| client.write(&node, bytes),
+        )
     }
 }
 
@@ -220,14 +227,10 @@ impl OpcUaTransport {
 
 impl Accepting for OpcUaTransport {
     fn take_one(self, listener: &TcpListener) -> Result<Arrived> {
-        let mut session = self.accept_one(listener)?;
-        let arrived = session
+        // The client keeps its session for the next write.
+        self.accept_one(listener)?
             .next_write()?
-            .ok_or_else(|| protocol_error("the client closed without writing"))?;
-        // Serve the close that follows, so the client's goodbye is
-        // answered rather than met by a closed socket.
-        while session.next_event()?.is_some() {}
-        Ok(arrived)
+            .ok_or_else(|| protocol_error("the client closed without writing"))
     }
 }
 
@@ -342,7 +345,8 @@ mod tests {
             session.value(&NodeId::string(2, "Recipe")),
             Some(&b"\0\xff"[..])
         );
-        while session.next_event().expect("event").is_some() {}
+        // The sender keeps its session for the next write.
+        drop(session);
         let mut session = far_end.accept_one(&listener).expect("third");
         while session.next_event().expect("event").is_some() {}
         let (read, unknown) = near.join().expect("thread").expect("near");
@@ -353,6 +357,39 @@ mod tests {
         let unknown = unknown.expect_err("an unknown node is refused");
         assert!(unknown.message.contains("no such node"), "{unknown}");
         assert!(!unknown.retryable);
+    }
+
+    #[test]
+    fn a_thousand_writes_open_one_session_and_a_session_the_server_closed_is_replaced() {
+        const SENDS: usize = 1000;
+        let far_end =
+            OpcUaTransport::new("opc.tcp://127.0.0.1:0/plant", node()).timing_out_after(secs(5));
+        let (listener, address) = far_end.bind().expect("binding");
+        let near = OpcUaTransport::new(format!("opc.tcp://{address}/plant"), node())
+            .timing_out_after(secs(5));
+        let sending = near.clone();
+        let sender = std::thread::spawn(move || {
+            let began = std::time::Instant::now();
+            for n in 0..SENDS {
+                sending.send("ns=2;s=Orders", n.to_string().as_bytes())?;
+            }
+            let took = began.elapsed();
+            // Generous for a debug build under load: a millisecond a write.
+            assert!(took < Duration::from_millis(SENDS as u64), "{took:?}");
+            sending.send("ns=2;s=Orders", b"after the close")
+        });
+        // One channel and one activated session for every write.
+        let mut session = far_end.accept_one(&listener).expect("accepting");
+        for n in 0..SENDS {
+            let written = session.next_write().expect("write").expect("one");
+            assert_eq!(written.bytes, n.to_string().as_bytes());
+        }
+        drop(session);
+        let mut again = far_end.accept_one(&listener).expect("a new session");
+        let last = again.next_write().expect("write").expect("one");
+        assert_eq!(last.bytes, b"after the close");
+        sender.join().expect("thread").expect("sending");
+        assert_eq!(near.sessions.opened(), 2);
     }
 
     #[test]

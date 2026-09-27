@@ -1,15 +1,16 @@
 //! Xmip's side of one connection to an OPC UA server: Hello and the
 //! Acknowledge, a secure channel under policy None, a session created and
-//! activated anonymously, then a Read or a Write of one node's value, and
-//! the session and channel closed behind it.
+//! activated anonymously, then Reads and Writes of a node's value, and
+//! the session and channel closed behind them.
 
 use std::io::BufReader;
 use std::net::TcpStream;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use codec::cursor::Cursor;
 use net::MAX_BODY;
 use transport::error::{Result, protocol_error};
+use transport::pool::{Pooled, alive};
 use transport::socket;
 
 use crate::attribute;
@@ -25,9 +26,13 @@ const LIFETIME: u32 = 3_600_000;
 /// What a call hints the server it will wait, in milliseconds.
 const TIMEOUT_HINT: u32 = 10_000;
 
+/// One activated session on one secure channel, kept between writes while
+/// the server keeps it and its channel token is young.
 pub struct Client {
     reader: BufReader<TcpStream>,
     writer: TcpStream,
+    /// When the channel was opened: its token is renewed by opening anew.
+    opened: Instant,
     /// The largest body the server reads in one chunk.
     chunk: usize,
     channel_id: u32,
@@ -52,6 +57,7 @@ impl Client {
         let mut client = Self {
             reader,
             writer,
+            opened: Instant::now(),
             chunk: Limits::DEFAULT.chunk_body(),
             channel_id: 0,
             token_id: 0,
@@ -228,6 +234,16 @@ impl Client {
             )));
         }
         Ok(reader)
+    }
+}
+
+impl Pooled for Client {
+    /// While the server has not closed the connection and the channel's
+    /// token has most of its lifetime left: a channel is not renewed here,
+    /// so one near the end of its token is let go and a new one opened.
+    fn usable(&mut self) -> bool {
+        let young = Duration::from_millis(u64::from(LIFETIME) / 4 * 3);
+        self.opened.elapsed() < young && alive(&self.writer)
     }
 }
 
