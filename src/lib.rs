@@ -42,6 +42,7 @@ use std::net::TcpListener;
 use std::time::Duration;
 
 pub use client::Client;
+use net::Target;
 pub use node::NodeId;
 pub use session::{Event, Session};
 use transport::error::{Result, protocol_error};
@@ -62,7 +63,8 @@ pub struct OpcUaTransport {
     endpoint: String,
     node: NodeId,
     timeout: Option<Duration>,
-    /// The sessions a send writes on, activated once per endpoint and kept.
+    /// The sessions a send writes on and a receive reads on, activated once
+    /// per endpoint and kept.
     sessions: Pool<Client>,
 }
 
@@ -118,13 +120,13 @@ impl OpcUaTransport {
     /// `opc.tcp://host:port/path#node` — or is a node id alone on this
     /// transport's endpoint.
     fn resolve(&self, target: &str) -> Result<(String, NodeId)> {
-        if target.starts_with("opc.tcp://") {
-            let (endpoint, node) = target.split_once('#').ok_or_else(|| {
+        if let Some(named) = Target::under(&["opc.tcp"], target) {
+            let node = named.fragment().ok_or_else(|| {
                 protocol_error(format!(
                     "{target:?} names no node: opc.tcp://host/path#node"
                 ))
             })?;
-            return Ok((endpoint.to_string(), NodeId::parse(node)?));
+            return Ok((named.absolute().to_string(), NodeId::parse(node)?));
         }
         Ok((self.endpoint.clone(), NodeId::parse(target)?))
     }
@@ -132,7 +134,8 @@ impl OpcUaTransport {
 
 /// The authority and path of `opc.tcp://host:port/path`.
 fn split(endpoint: &str) -> Result<(&str, &str)> {
-    socket::target("opc.tcp", endpoint)
+    Target::under(&["opc.tcp"], endpoint)
+        .map(|named| (named.authority(), named.path()))
         .ok_or_else(|| protocol_error(format!("{endpoint:?} is not opc.tcp://host:port/path")))
 }
 
@@ -145,11 +148,15 @@ impl Transport for OpcUaTransport {
         Directions::BOTH
     }
 
-    /// The node's value, one Stream; none where the value is null.
+    /// The node's value, one Stream, read on the session kept for the
+    /// endpoint: activated on the first receive. None where the value is
+    /// null.
     fn receive(&self) -> Result<Vec<Arrived>> {
-        let mut client = self.connect()?;
-        let value = client.read(&self.node)?;
-        client.close()?;
+        let value = self.sessions.exchange(
+            self.endpoint.as_str(),
+            || self.connect(),
+            |client| client.read(&self.node),
+        )?;
         if value.status != service::GOOD {
             return Err(service::status_error("reading the node", value.status));
         }
@@ -316,10 +323,12 @@ mod tests {
             let near = OpcUaTransport::new(&endpoint, node()).timing_out_after(secs(2));
             let read = near.receive()?;
             near.send(&format!("{endpoint}#ns=2;s=Recipe"), b"\0\xff")?;
+            let opened = near.sessions.opened();
+            drop(near);
             let unknown = OpcUaTransport::new(&endpoint, NodeId::string(2, "Unknown"))
                 .timing_out_after(secs(2))
                 .receive();
-            Ok::<_, transport::TransportError>((read, unknown))
+            Ok::<_, transport::TransportError>((read, opened, unknown))
         });
         let mut values = BTreeMap::new();
         values.insert(node(), b"ISA*00*".to_vec());
@@ -332,24 +341,24 @@ mod tests {
         while let Some(event) = session.next_event().expect("event") {
             events.push(event);
         }
+        // One endpoint, so one session reads and writes: activated once.
+        assert_eq!(events.len(), 4, "{events:?}");
         assert_eq!(events[0], Event::SessionCreated("xmip".to_string()));
         assert_eq!(events[1], Event::SessionActivated("anonymous".to_string()));
         assert_eq!(events[2], Event::Read(node()));
-        assert_eq!(events[3], Event::SessionClosed);
-        assert_eq!(events[4], Event::Closed);
-        let mut session = far_end.accept_one(&listener).expect("second");
-        let written = session.next_write().expect("write").expect("one");
+        let Event::Written(written) = &events[3] else {
+            panic!("a write: {events:?}");
+        };
         assert_eq!(written.bytes, b"\0\xff");
         assert!(written.origin_uri.ends_with("#ns=2;s=Recipe"));
         assert_eq!(
             session.value(&NodeId::string(2, "Recipe")),
             Some(&b"\0\xff"[..])
         );
-        // The sender keeps its session for the next write.
-        drop(session);
-        let mut session = far_end.accept_one(&listener).expect("third");
+        let mut session = far_end.accept_one(&listener).expect("second");
         while session.next_event().expect("event").is_some() {}
-        let (read, unknown) = near.join().expect("thread").expect("near");
+        let (read, opened, unknown) = near.join().expect("thread").expect("near");
+        assert_eq!(opened, 1);
         assert_eq!(read.len(), 1);
         assert_eq!(read[0].bytes, b"ISA*00*");
         assert!(read[0].origin_uri.starts_with("opc-ua://127.0.0.1:"));
@@ -390,6 +399,48 @@ mod tests {
         assert_eq!(last.bytes, b"after the close");
         sender.join().expect("thread").expect("sending");
         assert_eq!(near.sessions.opened(), 2);
+    }
+
+    #[test]
+    fn a_thousand_receives_open_one_session_and_a_session_the_server_closed_is_replaced() {
+        const RECEIVES: usize = 1000;
+        let far_end =
+            OpcUaTransport::new("opc.tcp://127.0.0.1:0/plant", node()).timing_out_after(secs(5));
+        let (listener, address) = far_end.bind().expect("binding");
+        let near = OpcUaTransport::new(format!("opc.tcp://{address}/plant"), node())
+            .timing_out_after(secs(5));
+        let (go, going) = std::sync::mpsc::channel();
+        let receiver = std::thread::spawn(move || {
+            let began = std::time::Instant::now();
+            for _ in 0..RECEIVES {
+                assert_eq!(near.receive()?.len(), 1);
+            }
+            let took = began.elapsed();
+            // Generous for a debug build under load: a millisecond a receive.
+            assert!(took < Duration::from_millis(RECEIVES as u64), "{took:?}");
+            // A send on the same kept session says the receives are done.
+            near.send("ns=2;s=Orders", b"received")?;
+            going.recv().expect("go");
+            Ok::<_, transport::TransportError>((near.receive()?, near.sessions.opened()))
+        });
+        let mut values = BTreeMap::new();
+        values.insert(node(), b"ISA*00*".to_vec());
+        let mut session = far_end
+            .accept_one(&listener)
+            .expect("accepting")
+            .with_values(values.clone());
+        let marker = session.next_write().expect("served").expect("the marker");
+        assert_eq!(marker.bytes, b"received");
+        drop(session);
+        go.send(()).expect("went");
+        let mut again = far_end
+            .accept_one(&listener)
+            .expect("accepting")
+            .with_values(values.clone());
+        while again.next_event().expect("served").is_some() {}
+        let (arrived, opened) = receiver.join().expect("thread").expect("received");
+        assert_eq!(arrived.len(), 1);
+        assert_eq!(opened, 2);
     }
 
     #[test]

@@ -17,7 +17,7 @@ pub const OPEN_CHANNEL_REQUEST: u32 = 446;
 /// `OpenSecureChannelResponse_Encoding_DefaultBinary`.
 pub const OPEN_CHANNEL_RESPONSE: u32 = 449;
 /// `CloseSecureChannelRequest_Encoding_DefaultBinary`.
-pub const CLOSE_CHANNEL_REQUEST: u32 = 452;
+const CLOSE_CHANNEL_REQUEST: u32 = 452;
 /// `ServiceFault_Encoding_DefaultBinary`.
 pub const SERVICE_FAULT: u32 = 397;
 
@@ -40,9 +40,9 @@ pub const BAD_TYPE_MISMATCH: u32 = 0x8074_0000;
 /// `Bad_TcpEndpointUrlInvalid`.
 pub const BAD_ENDPOINT_URL_INVALID: u32 = 0x8083_0000;
 /// `Bad_TcpMessageTooLarge`.
-pub const BAD_MESSAGE_TOO_LARGE: u32 = 0x8080_0000;
+const BAD_MESSAGE_TOO_LARGE: u32 = 0x8080_0000;
 /// `Bad_ServerNotConnected`, a transient the client may retry.
-pub const BAD_SERVER_NOT_CONNECTED: u32 = 0x8095_0000;
+const BAD_SERVER_NOT_CONNECTED: u32 = 0x8095_0000;
 
 /// The failure a status code names, for a message: retryable where the
 /// server said it is busy or not yet up.

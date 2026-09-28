@@ -27,13 +27,12 @@ pub const CLOSE_SESSION_REQUEST: u32 = 473;
 /// `CloseSessionResponse_Encoding_DefaultBinary`.
 pub const CLOSE_SESSION_RESPONSE: u32 = 476;
 /// `AnonymousIdentityToken_Encoding_DefaultBinary`.
-pub const ANONYMOUS_IDENTITY_TOKEN: u32 = 321;
+const ANONYMOUS_IDENTITY_TOKEN: u32 = 321;
 
 /// What this side says it is.
-pub const APPLICATION_URI: &str = "urn:xmip:transport:opc-ua";
+const APPLICATION_URI: &str = "urn:xmip:transport:opc-ua";
 /// The transport profile of the binary encoding over TCP.
-pub const BINARY_PROFILE: &str =
-    "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary";
+const BINARY_PROFILE: &str = "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary";
 
 /// The application description, a client's or a server's.
 fn put_application(out: &mut Vec<u8>, kind: u32) {

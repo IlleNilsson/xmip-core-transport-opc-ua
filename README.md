@@ -4,6 +4,10 @@ OPC UA transport: one node's value is one Stream — the binary encoding over TC
 
 A Send Location writes on a session activated once per endpoint and kept (`transport::Pool`), let go before its channel token nears the end of its lifetime. Until 2026-09-27 every write opened a channel and a session and closed both.
 
+A Receive Location reads its node on the same kept session. Until 2026-09-28 every receive opened a channel and a session and closed both.
+
+A send target is read by `net::Target` in [xmip-core-library-net](https://github.com/IlleNilsson/xmip-core-library-net), the one reading of a URI every technology calls. Until 2026-09-28 this technology stripped its scheme by hand.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it
