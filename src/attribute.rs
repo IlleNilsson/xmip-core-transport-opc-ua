@@ -20,7 +20,7 @@ pub const WRITE_REQUEST: u32 = 673;
 pub const WRITE_RESPONSE: u32 = 676;
 
 /// The attribute a Stream is: `Value`.
-pub const VALUE_ATTRIBUTE: u32 = 13;
+const VALUE_ATTRIBUTE: u32 = 13;
 
 /// `ReadRequest` for one node's value, source timestamp asked for.
 #[derive(Clone, Debug, PartialEq, Eq)]

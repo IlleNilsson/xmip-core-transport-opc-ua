@@ -29,7 +29,7 @@ use crate::service::{RequestHeader, ResponseHeader};
 use crate::wire::DataValue;
 
 /// The one user token policy this session offers.
-pub const ANONYMOUS_POLICY: &str = "anonymous";
+const ANONYMOUS_POLICY: &str = "anonymous";
 
 /// What the client did, as [`Session::next_event`] reports it.
 #[derive(Clone, Debug, PartialEq, Eq)]

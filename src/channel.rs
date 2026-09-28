@@ -37,7 +37,7 @@ pub const CLOSE: [u8; 3] = *b"CLO";
 /// channel id, the token id and the sequence header.
 const CHUNK_OVERHEAD: usize = 24;
 /// The smallest receive buffer the specification allows.
-pub const MIN_BUFFER: u32 = 8_192;
+const MIN_BUFFER: u32 = 8_192;
 
 /// What one side reads and sends: a chunk's size each way, the largest
 /// message and the most chunks, zero for no limit.
@@ -190,13 +190,10 @@ pub fn write_raw(writer: &mut impl Write, kind: [u8; 3], is_final: u8, body: &[u
 ///
 /// # Errors
 /// Where the connection broke mid-message, or the message is over `max`.
-pub fn read_raw(reader: &mut impl Read, max: usize) -> Result<Option<Raw>> {
-    let mut head = [0u8; 8];
-    match reader.read_exact(&mut head) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(classify("reading a message header", &e)),
-    }
+fn read_raw(reader: &mut impl Read, max: usize) -> Result<Option<Raw>> {
+    let Some(head) = net::read::header::<8>(reader, "a message header")? else {
+        return Ok(None);
+    };
     let size = u32::from_le_bytes([head[4], head[5], head[6], head[7]]) as usize;
     if size < 8 || size - 8 > max {
         return Err(protocol_error(format!("a message of {size} bytes")));
