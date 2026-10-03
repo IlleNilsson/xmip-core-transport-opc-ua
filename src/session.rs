@@ -1,5 +1,5 @@
-//! The server's side of one connection: what a test puts at the far end,
-//! and what a Receive Location that accepts writes directly runs.
+//! The server's side of one connection: what a test and the loopback put
+//! at the far end. It answers each write Good as it takes it.
 //!
 //! Not an OPC UA server. One session answers one client's Hello, opens
 //! its one secure channel under policy None, creates and activates its
@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use codec::cursor::Cursor;
 use net::MAX_BODY;
-use transport::Arrived;
+use transport::Taken;
 use transport::error::{Result, protocol_error};
 use transport::socket;
 
@@ -40,8 +40,9 @@ pub enum Event {
     SessionActivated(String),
     /// The client read this node.
     Read(NodeId),
-    /// The client wrote a node; here is the Stream.
-    Written(Arrived),
+    /// The client wrote a node, and was answered Good; here is what it
+    /// wrote.
+    Written(Taken),
     /// The client wrote a value that is not bytes, and was told so.
     Refused(NodeId),
     /// The client closed its session.
@@ -172,7 +173,7 @@ impl Session {
     ///
     /// # Errors
     /// Where the connection broke, or nothing arrived before the timeout.
-    pub fn next_write(&mut self) -> Result<Option<Arrived>> {
+    pub fn next_write(&mut self) -> Result<Option<Taken>> {
         loop {
             match self.next_event()? {
                 Some(Event::Written(arrived)) => return Ok(Some(arrived)),
@@ -311,7 +312,7 @@ impl Session {
         };
         Ok(Ok((
             result.to_bytes(),
-            Event::Written(Arrived::new(origin, bytes)),
+            Event::Written(Taken::new(origin, bytes)),
         )))
     }
 

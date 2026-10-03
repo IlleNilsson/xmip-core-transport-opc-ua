@@ -8,6 +8,13 @@ A Receive Location reads its node on the same kept session. Until 2026-09-28 eve
 
 A send target is read by `net::Target` in [xmip-core-library-net](https://github.com/IlleNilsson/xmip-core-library-net), the one reading of a URI every technology calls. Until 2026-09-28 this technology stripped its scheme by hand.
 
+## Acknowledgement
+
+A receive is a `Read` of the node's value, which consumes nothing at the
+server. Its verdict therefore has nothing to tell the server, whichever it is:
+a receive cycle that did not complete loses nothing, and the next read finds
+the value again. The value arrives whole.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it

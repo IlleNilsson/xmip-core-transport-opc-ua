@@ -11,9 +11,9 @@
 //! `ActivateSession` with an anonymous identity, then a `Read` or a
 //! `Write` of one node's value attribute as a byte string, in chunks
 //! where the value is longer than the far end's buffer. A Receive
-//! Location reads its node; a Send Location writes to one. Either may
-//! instead accept clients directly through [`Session`], one client's
-//! worth of server over a namespace in memory. Signing and encryption are
+//! Location reads its node; a Send Location writes to one. [`Session`] is
+//! one client's worth of server over a namespace in memory, what a test
+//! and the loopback put at the far end. Signing and encryption are
 //! the other policies' and join with the capability's identity work; a
 //! server that requires them refuses the channel, and this transport
 //! says so.
@@ -22,7 +22,9 @@
 //! so [`Transport::claims`] answers `None`, ADR-0024. A Receive Location
 //! that polls reads the same value until it is written again; the source
 //! timestamp is on the origin so the flow can tell a re-read from a new
-//! value.
+//! value. **For the same reason a receive's verdict has nothing to tell
+//! the server**: a read consumes nothing, and a cycle that did not
+//! complete loses nothing.
 //!
 //! The origin URI is the endpoint and the node: `opc-ua://host:4840/path
 //! #ns=2;s=Orders?source=<timestamp>`. A send target is
@@ -49,7 +51,7 @@ use transport::error::{Result, protocol_error};
 use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
-use transport::{Arrived, Configured, Directions, Pool, Transport};
+use transport::{Acknowledgement, Arrived, Configured, Directions, Pool, Taken, Transport};
 pub use wire::DataValue;
 use xcore::settings::{Applies, Kind, Presence, Read, Setting, Settings};
 
@@ -148,9 +150,15 @@ impl Transport for OpcUaTransport {
         Directions::BOTH
     }
 
-    /// The node's value, one Stream, read on the session kept for the
-    /// endpoint: activated on the first receive. None where the value is
-    /// null.
+    fn arrivals(&self) -> transport::Arrivals {
+        transport::Arrivals::Ordered("a poll reads again what is not yet told")
+    }
+
+    /// The node's value, one Stream, whole, read on the session kept for
+    /// the endpoint: activated on the first receive. None where the value
+    /// is null. The verdict has nothing to tell the server, whichever it is:
+    /// a `Read` consumes nothing, so a cycle that did not complete loses
+    /// nothing — the next read finds the value again.
     fn receive(&self) -> Result<Vec<Arrived>> {
         let value = self.sessions.exchange(
             self.endpoint.as_str(),
@@ -166,7 +174,11 @@ impl Transport for OpcUaTransport {
         let (authority, path) = split(&self.endpoint)?;
         let source = value.source_timestamp.unwrap_or(0);
         let origin = format!("opc-ua://{authority}/{path}#{}?source={source}", self.node);
-        Ok(vec![Arrived::new(origin, bytes)])
+        Ok(vec![Arrived::whole(
+            origin,
+            bytes,
+            Acknowledgement::unconsumed(),
+        )])
     }
 
     /// Write the node's value on the session kept for the endpoint,
@@ -233,7 +245,7 @@ impl OpcUaTransport {
 }
 
 impl Accepting for OpcUaTransport {
-    fn take_one(self, listener: &TcpListener) -> Result<Arrived> {
+    fn take_one(self, listener: &TcpListener) -> Result<Taken> {
         // The client keeps its session for the next write.
         self.accept_one(listener)?
             .next_write()?
@@ -360,9 +372,12 @@ mod tests {
         let (read, opened, unknown) = near.join().expect("thread").expect("near");
         assert_eq!(opened, 1);
         assert_eq!(read.len(), 1);
-        assert_eq!(read[0].bytes, b"ISA*00*");
-        assert!(read[0].origin_uri.starts_with("opc-ua://127.0.0.1:"));
-        assert!(read[0].origin_uri.contains("/plant#ns=2;s=Orders?source="));
+        let read = read.into_iter().next().expect("one");
+        assert!(read.defers(), "a read consumes nothing: nothing to lose");
+        let read = read.taken().expect("taken");
+        assert_eq!(read.bytes, b"ISA*00*");
+        assert!(read.origin_uri.starts_with("opc-ua://127.0.0.1:"));
+        assert!(read.origin_uri.contains("/plant#ns=2;s=Orders?source="));
         let unknown = unknown.expect_err("an unknown node is refused");
         assert!(unknown.message.contains("no such node"), "{unknown}");
         assert!(!unknown.retryable);
