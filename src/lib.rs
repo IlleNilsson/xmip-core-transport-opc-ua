@@ -47,6 +47,7 @@ pub use client::Client;
 use net::Target;
 pub use node::NodeId;
 pub use session::{Event, Session};
+use transport::ArrivalIdentity;
 use transport::error::{Result, protocol_error};
 use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
@@ -174,11 +175,9 @@ impl Transport for OpcUaTransport {
         let (authority, path) = split(&self.endpoint)?;
         let source = value.source_timestamp.unwrap_or(0);
         let origin = format!("opc-ua://{authority}/{path}#{}?source={source}", self.node);
-        Ok(vec![Arrived::whole(
-            origin,
-            bytes,
-            Acknowledgement::unconsumed(),
-        )])
+        Ok(vec![
+            Arrived::whole(origin, bytes, Acknowledgement::unconsumed()).scheduled(),
+        ])
     }
 
     /// Write the node's value on the session kept for the endpoint,
@@ -254,6 +253,12 @@ impl Accepting for OpcUaTransport {
 }
 
 impl Loopback for OpcUaTransport {
+    fn arrival_identity(&self) -> ArrivalIdentity {
+        ArrivalIdentity::Unnamed(
+            "Xmip reads the server's node itself, so the server it read is in its origin",
+        )
+    }
+
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
         Ok(Box::new(Listening::new(self.clone(), self.bind()?)))
     }
