@@ -155,6 +155,10 @@ impl Transport for OpcUaTransport {
         transport::Arrivals::Ordered("a poll reads again what is not yet told")
     }
 
+    fn waiting(&self) -> transport::Waiting {
+        transport::Waiting::Polled("a read of the node returns at once")
+    }
+
     /// The node's value, one Stream, whole, read on the session kept for
     /// the endpoint: activated on the first receive. None where the value
     /// is null. The verdict has nothing to tell the server, whichever it is:
