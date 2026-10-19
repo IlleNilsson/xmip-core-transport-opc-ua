@@ -164,7 +164,7 @@ impl Transport for OpcUaTransport {
     /// is null. The verdict has nothing to tell the server, whichever it is:
     /// a `Read` consumes nothing, so a cycle that did not complete loses
     /// nothing — the next read finds the value again.
-    fn receive(&self) -> Result<Vec<Arrived>> {
+    fn receive_up_to(&self, _most: usize) -> Result<Vec<Arrived>> {
         let value = self.sessions.exchange(
             self.endpoint.as_str(),
             || self.connect(),
@@ -184,9 +184,14 @@ impl Transport for OpcUaTransport {
         ])
     }
 
+    fn sending(&self) -> transport::Sending {
+        transport::Sending::Gathered("one OPC UA Write carries the whole value")
+    }
+
     /// Write the node's value on the session kept for the endpoint,
     /// activated on the first send to it.
-    fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
+    fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
+        let bytes: &[u8] = &outgoing.gather()?;
         let (endpoint, node) = self.resolve(target)?;
         let (authority, _) = split(&endpoint)?;
         self.sessions.exchange(
