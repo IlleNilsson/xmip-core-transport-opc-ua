@@ -18,7 +18,7 @@
 //! server that requires them refuses the channel, and this transport
 //! says so.
 //!
-//! A node's value is not an artefact to claim — it is read, not taken —
+//! A node's value is not an artifact to claim — it is read, not taken —
 //! so [`Transport::claims`] answers `None`, ADR-0024. A Receive Location
 //! that polls reads the same value until it is written again; the source
 //! timestamp is on the origin so the flow can tell a re-read from a new
