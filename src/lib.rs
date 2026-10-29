@@ -123,7 +123,7 @@ impl OpcUaTransport {
     /// `opc.tcp://host:port/path#node` — or is a node id alone on this
     /// transport's endpoint.
     fn resolve(&self, target: &str) -> Result<(String, NodeId)> {
-        if let Some(named) = Target::under(&["opc.tcp"], target) {
+        if let Some(named) = Target::under(Self::SCHEMES, target) {
             let node = named.fragment().ok_or_else(|| {
                 protocol_error(format!(
                     "{target:?} names no node: opc.tcp://host/path#node"
@@ -137,7 +137,7 @@ impl OpcUaTransport {
 
 /// The authority and path of `opc.tcp://host:port/path`.
 fn split(endpoint: &str) -> Result<(&str, &str)> {
-    Target::under(&["opc.tcp"], endpoint)
+    Target::under(<OpcUaTransport as Configured>::SCHEMES, endpoint)
         .map(|named| (named.authority(), named.path()))
         .ok_or_else(|| protocol_error(format!("{endpoint:?} is not opc.tcp://host:port/path")))
 }
@@ -226,6 +226,14 @@ impl Configured for OpcUaTransport {
             },
         ],
     };
+
+    /// The schemes a Location's address is entered with to choose this technology.
+    const SCHEMES: &'static [&'static str] = &["opc.tcp"];
+
+    /// The whole address: the endpoint URL is what a session names to the server.
+    fn own_terms(address: &str) -> &str {
+        address
+    }
 
     /// A Send Location's target names the node it writes, so it reads none.
     fn configured(address: &str, settings: &Read) -> Result<Self> {
