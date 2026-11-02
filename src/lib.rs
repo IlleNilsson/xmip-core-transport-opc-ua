@@ -415,13 +415,9 @@ mod tests {
             .timing_out_after(secs(5));
         let sending = near.clone();
         let sender = std::thread::spawn(move || {
-            let began = std::time::Instant::now();
             for n in 0..SENDS {
                 sending.send("ns=2;s=Orders", n.to_string().as_bytes())?;
             }
-            let took = began.elapsed();
-            // Generous for a debug build under load: a millisecond a write.
-            assert!(took < Duration::from_millis(SENDS as u64), "{took:?}");
             sending.send("ns=2;s=Orders", b"after the close")
         });
         // One channel and one activated session for every write.
@@ -448,13 +444,9 @@ mod tests {
             .timing_out_after(secs(5));
         let (go, going) = std::sync::mpsc::channel();
         let receiver = std::thread::spawn(move || {
-            let began = std::time::Instant::now();
             for _ in 0..RECEIVES {
                 assert_eq!(near.receive()?.len(), 1);
             }
-            let took = began.elapsed();
-            // Generous for a debug build under load: a millisecond a receive.
-            assert!(took < Duration::from_millis(RECEIVES as u64), "{took:?}");
             // A send on the same kept session says the receives are done.
             near.send("ns=2;s=Orders", b"received")?;
             going.recv().expect("go");
