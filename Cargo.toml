@@ -20,9 +20,10 @@ path = "src/lib.rs"
 # policy None there is nothing to sign.
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
 # The settings this technology declares (xcore::settings), read through
-# transport::Configured (ADR-0064, amendment 2026-09-26).
+# transport::Configured (ADR-0064, amendment 2026-09-26), and the one clock
+# (xcore::Clock) a DateTime is read from.
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
-# The estate's encoding primitives: the byte cursor and writer the binary encoding is read and written over.
+# The estate's encoding primitives: the byte cursor and writer the binary encoding is read and written over, and the FILETIME a DateTime counts (codec::filetime).
 codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
 # The most a connection is read for: the ceiling a secure channel's chunks
 # are read under (`net::MAX_BODY`).
