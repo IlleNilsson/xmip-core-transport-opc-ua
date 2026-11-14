@@ -6,11 +6,11 @@
 //! written here over codec's cursor and writer; nothing here knows which
 //! service is speaking.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use codec::cursor::Cursor;
+use codec::filetime;
 use codec::writer::ByteWriter;
 use transport::error::{Result, protocol_error};
+use xcore::{Clock, SystemClock};
 
 use crate::node::NodeId;
 
@@ -294,16 +294,12 @@ impl DataValue {
     }
 }
 
-/// The offset of 1601-01-01 from 1970-01-01 in hundred-nanosecond ticks.
-const EPOCH_1601: i64 = 116_444_736_000_000_000;
-
-/// Now, as an OPC UA `DateTime`: hundred-nanosecond ticks since 1601.
+/// Now, as an OPC UA `DateTime`: hundred-nanosecond ticks since 1601, a
+/// `FILETIME` (`codec::filetime`).
 #[must_use]
 pub fn now() -> i64 {
-    let since = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_nanos() / 100);
-    i64::try_from(since).unwrap_or(i64::MAX - EPOCH_1601) + EPOCH_1601
+    let ticks = filetime::from_unix_nanos(SystemClock.unix_timestamp_nanos().max(0));
+    i64::try_from(ticks).unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]
@@ -381,6 +377,6 @@ mod tests {
         let number = [0x01, 6, 1, 0, 0, 0];
         let error = DataValue::take(&mut Cursor::new(&number)).expect_err("an Int32");
         assert!(error.message.contains("variant type 6"), "{error}");
-        assert!(now() > EPOCH_1601);
+        assert!(i128::from(now()) > filetime::AT_UNIX_EPOCH);
     }
 }
