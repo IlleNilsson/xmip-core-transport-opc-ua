@@ -8,12 +8,20 @@
 //!
 //! - a thousand writes on one session take a millisecond each at most;
 //! - a thousand receives on one session take a millisecond each at most.
+//!
+//! Each the millisecond beyond the round's wakes, round by round beside a
+//! plain wake, the fastest of five (`xcore::latency::Rounds`).
 
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use transport::Transport;
+use xcore::latency::Rounds;
 use xmip_core_transport_opc_ua::{NodeId, OpcUaTransport};
+
+/// What a write or a read wakes where a plain wake wakes one: the far end
+/// at the request, and this end at its response.
+const WAKES: u32 = 2;
 
 fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
@@ -38,21 +46,19 @@ fn a_thousand_writes_take_a_millisecond_each_at_most() {
     const SENDS: usize = 1000;
     let (far_end, listener, near) = ends();
     let sender = std::thread::spawn(move || {
-        let began = Instant::now();
+        let mut rounds = Rounds::crossing(WAKES);
         for n in 0..SENDS {
-            near.send("ns=2;s=Orders", n.to_string().as_bytes())?;
+            rounds.round(|| near.send("ns=2;s=Orders", n.to_string().as_bytes()))?;
         }
-        let took = began.elapsed();
-        // Generous for a debug build under load: a millisecond a write.
-        assert!(took < Duration::from_millis(SENDS as u64), "{took:?}");
-        Ok::<_, transport::TransportError>(())
+        Ok::<_, transport::TransportError>(rounds)
     });
     let mut session = far_end.accept_one(&listener).expect("accepting");
     for n in 0..SENDS {
         let written = session.next_write().expect("write").expect("one");
         assert_eq!(written.bytes, n.to_string().as_bytes());
     }
-    sender.join().expect("thread").expect("sending");
+    let rounds = sender.join().expect("thread").expect("sending");
+    rounds.hold("a write");
 }
 
 #[test]
@@ -60,14 +66,11 @@ fn a_thousand_receives_take_a_millisecond_each_at_most() {
     const RECEIVES: usize = 1000;
     let (far_end, listener, near) = ends();
     let receiver = std::thread::spawn(move || {
-        let began = Instant::now();
+        let mut rounds = Rounds::crossing(WAKES);
         for _ in 0..RECEIVES {
-            assert_eq!(near.receive()?.len(), 1);
+            assert_eq!(rounds.round(|| near.receive())?.len(), 1);
         }
-        let took = began.elapsed();
-        // Generous for a debug build under load: a millisecond a receive.
-        assert!(took < Duration::from_millis(RECEIVES as u64), "{took:?}");
-        Ok::<_, transport::TransportError>(())
+        Ok::<_, transport::TransportError>(rounds)
     });
     let mut values = BTreeMap::new();
     values.insert(node(), b"ISA*00*".to_vec());
@@ -77,5 +80,6 @@ fn a_thousand_receives_take_a_millisecond_each_at_most() {
         .expect("accepting")
         .with_values(values);
     while session.next_event().expect("served").is_some() {}
-    receiver.join().expect("thread").expect("received");
+    let rounds = receiver.join().expect("thread").expect("received");
+    rounds.hold("a receive, a read");
 }
