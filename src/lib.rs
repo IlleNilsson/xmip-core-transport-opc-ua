@@ -84,13 +84,6 @@ impl OpcUaTransport {
         }
     }
 
-    /// Give up on a server that stops mid-answer.
-    #[must_use]
-    pub const fn timing_out_after(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
-        self
-    }
-
     /// Connect to the endpoint with a session activated.
     ///
     /// # Errors
@@ -216,14 +209,12 @@ impl Configured for OpcUaTransport {
                           or `i=2253`.",
                 applies: Applies::Receive,
             },
-            Setting {
-                name: "timeout",
-                kind: Kind::Duration,
-                presence: Presence::Optional,
-                meaning: "How long a server that stops mid-answer is waited on; unbounded \
-                          when left out.",
-                applies: Applies::Both,
-            },
+            transport::configured::timeout(
+                Applies::Both,
+                None,
+                "How long a server that stops mid-answer is waited on; unbounded \
+                 when left out.",
+            ),
         ],
     };
 
@@ -235,17 +226,17 @@ impl Configured for OpcUaTransport {
         address
     }
 
+    fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
+        Some(&mut self.timeout)
+    }
+
     /// A Send Location's target names the node it writes, so it reads none.
     fn configured(address: &str, settings: &Read) -> Result<Self> {
         let node = match settings.optional_text("node") {
             Some(node) => NodeId::parse(node)?,
             None => NodeId::numeric(0, 0),
         };
-        let transport = Self::new(address, node);
-        Ok(match settings.optional_duration("timeout") {
-            Some(timeout) => transport.timing_out_after(timeout),
-            None => transport,
-        })
+        Ok(Self::new(address, node))
     }
 }
 
