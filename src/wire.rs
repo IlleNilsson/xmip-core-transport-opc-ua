@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(reader.string().expect("string"), Some("x".to_string()));
         reader.skip_localized_text().expect("text");
         reader.skip_diagnostic_info().expect("diagnostic");
-        assert_eq!(reader.remaining(), []);
+        assert_eq!(reader.remaining(), b"");
         assert!(reader.byte().is_err(), "cut short");
         assert_eq!(Cursor::new(&[0xff; 4]).count().expect("minus one"), 0);
         assert!(Cursor::new(&[9, 0, 0, 0]).count().is_err(), "absurd");
