@@ -30,36 +30,68 @@
 //! #ns=2;s=Orders?source=<timestamp>`. A send target is
 //! `opc.tcp://host:4840/path#ns=2;s=Orders`, or a node id alone —
 //! `ns=2;s=Orders`, `i=2253` — on the configured endpoint.
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location of it is configured with, and none of
+//! the code above, which is behind the default feature: what the surfaces'
+//! library carries (ADR-0064, amendment 2026-11-26).
 
+#[cfg(feature = "default")]
 pub mod attribute;
+#[cfg(feature = "default")]
 pub mod channel;
+#[cfg(feature = "default")]
 pub mod client;
+#[cfg(feature = "declaration")]
+pub mod declaration;
+#[cfg(feature = "default")]
 pub mod endpoint;
+#[cfg(feature = "default")]
 pub mod node;
+#[cfg(feature = "default")]
 pub mod service;
+#[cfg(feature = "default")]
 pub mod session;
+#[cfg(feature = "default")]
 pub mod wire;
 
+#[cfg(feature = "default")]
 use std::net::TcpListener;
+#[cfg(feature = "default")]
 use std::time::Duration;
 
+#[cfg(feature = "default")]
 pub use client::Client;
+#[cfg(feature = "default")]
 use net::Target;
+#[cfg(feature = "default")]
 pub use node::NodeId;
+#[cfg(feature = "default")]
 pub use session::{Event, Session};
+#[cfg(feature = "default")]
 use transport::ArrivalIdentity;
+#[cfg(feature = "default")]
 use transport::error::{Result, protocol_error};
+#[cfg(feature = "default")]
 use transport::listening::{Accepting, Listening};
+#[cfg(feature = "default")]
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
+#[cfg(feature = "default")]
 use transport::socket;
+#[cfg(feature = "default")]
 use transport::{Acknowledgement, Arrived, Configured, Directions, Pool, Taken, Transport};
+#[cfg(feature = "default")]
 pub use wire::DataValue;
-use xcore::settings::{Applies, Kind, Presence, Read, Setting, Settings};
+#[cfg(feature = "default")]
+use xcore::settings::{Read, Settings};
 
 /// The endpoint path and node the loopback pair agrees on.
+#[cfg(feature = "default")]
 const LOOPBACK_PATH: &str = "/xmip";
+#[cfg(feature = "default")]
 const LOOPBACK_NODE: &str = "ns=2;s=Probe";
 
+#[cfg(feature = "default")]
 #[derive(Clone)]
 pub struct OpcUaTransport {
     /// `opc.tcp://host:port/path`.
@@ -71,6 +103,7 @@ pub struct OpcUaTransport {
     sessions: Pool<Client>,
 }
 
+#[cfg(feature = "default")]
 impl OpcUaTransport {
     /// Speak to the server at `endpoint` — `opc.tcp://host:4840/path` —
     /// about `node`.
@@ -129,12 +162,14 @@ impl OpcUaTransport {
 }
 
 /// The authority and path of `opc.tcp://host:port/path`.
+#[cfg(feature = "default")]
 fn split(endpoint: &str) -> Result<(&str, &str)> {
     Target::under(<OpcUaTransport as Configured>::SCHEMES, endpoint)
         .map(|named| (named.authority(), named.path()))
         .ok_or_else(|| protocol_error(format!("{endpoint:?} is not opc.tcp://host:port/path")))
 }
 
+#[cfg(feature = "default")]
 impl Transport for OpcUaTransport {
     fn name(&self) -> &'static str {
         "opc-ua"
@@ -195,31 +230,10 @@ impl Transport for OpcUaTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Configured for OpcUaTransport {
-    /// The address is the endpoint, `opc.tcp://host:4840/path`: where a
-    /// Location opens its channel and session.
-    const SETTINGS: &'static Settings = &Settings {
-        technology: env!("CARGO_PKG_NAME"),
-        settings: &[
-            Setting {
-                name: "node",
-                kind: Kind::Text,
-                presence: Presence::Required,
-                meaning: "The node whose value a Receive Location reads, as `ns=2;s=Orders` \
-                          or `i=2253`.",
-                applies: Applies::Receive,
-            },
-            transport::configured::timeout(
-                Applies::Both,
-                None,
-                "How long a server that stops mid-answer is waited on; unbounded \
-                 when left out.",
-            ),
-        ],
-    };
-
-    /// The schemes a Location's address is entered with to choose this technology.
-    const SCHEMES: &'static [&'static str] = &["opc.tcp"];
+    const SETTINGS: &'static Settings = declaration::SETTINGS;
+    const SCHEMES: &'static [&'static str] = declaration::SCHEMES;
 
     /// The whole address: the endpoint URL is what a session names to the server.
     fn own_terms(address: &str) -> &str {
@@ -240,6 +254,7 @@ impl Configured for OpcUaTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl OpcUaTransport {
     /// Both ends on this machine: an ephemeral local port, one node, the
     /// loopback timeout on every read.
@@ -251,6 +266,7 @@ impl OpcUaTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Accepting for OpcUaTransport {
     fn take_one(self, listener: &TcpListener) -> Result<Taken> {
         // The client keeps its session for the next write.
@@ -260,6 +276,7 @@ impl Accepting for OpcUaTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Loopback for OpcUaTransport {
     fn arrival_identity(&self) -> ArrivalIdentity {
         ArrivalIdentity::Unnamed(
@@ -289,7 +306,7 @@ mod tests {
 
     #[test]
     fn opc_ua_declares_its_settings_and_reads_through_them() {
-        use xcore::settings::Given;
+        use xcore::settings::{Applies, Given};
         assert_eq!(OpcUaTransport::SETTINGS.problems(), Vec::<String>::new());
         let endpoint = "opc.tcp://plant:4840/line";
         let text = |name: &str, value: &str| (name.to_string(), Given::Text(value.to_string()));

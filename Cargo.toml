@@ -14,17 +14,31 @@ path = "src/lib.rs"
 # A Technology depends on its parent Capability, never the reverse
 # (repository-model.md). Standard library otherwise: the binary encoding is
 # little-endian integers, counted strings and a node id, and with security
-# policy None there is nothing to sign.
+# policy None there is nothing to sign. Its declaration takes the
+# capability's `timeout` (`transport::configured::timeout`).
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
 # The settings this technology declares (xcore::settings), read through
 # transport::Configured (ADR-0064, amendment 2026-09-26), and the one clock
 # (xcore::Clock) a DateTime is read from.
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
-# The estate's encoding primitives: the byte cursor and writer the binary encoding is read and written over, and the FILETIME a DateTime counts (codec::filetime).
-codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
+# The estate's encoding primitives: the byte cursor and writer the binary
+# encoding is read and written over, and the FILETIME a DateTime counts
+# (codec::filetime).
+codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main", optional = true }
 # The most a connection is read for: the ceiling a secure channel's chunks
-# are read under (`net::MAX_BODY`).
-net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson/xmip-core-library-net", branch = "main" }
+# are read under (`net::MAX_BODY`), and the endpoint read as a URI
+# (`net::Target`).
+net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson/xmip-core-library-net", branch = "main", optional = true }
+
+[features]
+# The technology: its code, everything it is built on, and its declaration.
+# Without it the crate is its declaration alone (ADR-0064, amendments
+# 2026-10-22 and 2026-11-26).
+default = ["declaration", "dep:codec", "dep:net"]
+# The declaration alone: what a Location of this technology is configured
+# with, `declaration::SETTINGS` and `SCHEMES`, and none of the code — what
+# the surfaces' library is to carry (open problem 48).
+declaration = []
 
 # The module's timing program (doc/governance/rust-style.md section 5c): a
 # plain cargo test leaves it out, and the landing runs it after every other

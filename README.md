@@ -15,6 +15,10 @@ server. Its verdict therefore has nothing to tell the server, whichever it is:
 a receive cycle that did not complete loses nothing, and the next read finds
 the value again. The value arrives whole.
 
+## The declaration
+
+What a Location of this technology is configured with is two `const`s in its `declaration` module, `src/declaration.rs`, beside the code, which `Configured` reads (ADR-0064, amendment 2026-11-26): `declaration::SETTINGS`, `node` and `timeout`, and `SCHEMES`, `opc.tcp`. Built with its `declaration` feature alone (`--no-default-features --features declaration`), the crate is those and nothing more: its code and every crate the code is built on are behind the default feature. So the library the surfaces load can carry it without the code, for the language server and the desktop to suggest and check an OPC UA Location's settings though no node in their process loaded the technology, once the gathering crate of open problem 48 links it. `test/Declaration.Test.ps1` in the estate holds that the declaration builds nothing the transport capability does not.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it
